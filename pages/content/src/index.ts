@@ -75,11 +75,16 @@ async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
 async function updateImageAlts() {
   const images = Array.from(document.getElementsByTagName('img'));
 
-  const imageData = images.map(img => ({
+  const significantImages = images.filter(img => {
+    const rect = img.getBoundingClientRect();
+    return rect.width >= 200;
+  });
+
+  const imageData = significantImages.map(img => ({
     src: img.src,
     currentAlt: img.alt,
   }));
-  console.log(imageData);
+  console.log('처리할 이미지 수:', imageData.length);
 
   const newAltTexts = await fetchNewAltTexts(imageData);
 
