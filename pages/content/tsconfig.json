@@ -7,5 +7,6 @@
     },
     "types": ["chrome", "../../vite-env.d.ts"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "lib": "es2015"
 }

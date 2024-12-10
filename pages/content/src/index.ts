@@ -1,28 +1,61 @@
 import { toggleTheme } from '@src/toggleTheme';
 
 console.log('content script loaded');
+// 시연 시 저시력자 시연용 블러 필터 적용
+//addBlurEffect();
 
-let isFirstClick = true;
+function waitForImages(): Promise<void> {
+  return new Promise(resolve => {
+    let lastCount = 0;
+    let stabilityCounter = 0;
 
-async function toBase64(url: string): Promise<string> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+    const checkImages = setInterval(() => {
+      const currentCount = document.getElementsByTagName('img').length;
+      console.log('현재 감지된 이미지 수:', currentCount);
+
+      if (currentCount === lastCount) {
+        stabilityCounter++;
+        if (stabilityCounter >= 1) {
+          clearInterval(checkImages);
+          console.log('이미지 로딩 완료. 최종 이미지 수:', currentCount);
+          resolve();
+        }
+      } else {
+        stabilityCounter = 0;
+      }
+
+      lastCount = currentCount;
+    }, 2000); // 2초로 증가
+
+    // 30초 후에는 강제로 종료
+    setTimeout(() => {
+      clearInterval(checkImages);
+      console.log('시간 초과. 현재 이미지 수로 진행:', lastCount);
+      resolve();
+    }, 30000);
   });
 }
 
+const observer = new MutationObserver(async mutations => {
+  await waitForImages();
+  updateImageAlts();
+  observer.disconnect(); // 한 번만 실행하고 옵저버 중지
+});
+
+observer.observe(document.documentElement, {
+  childList: true,
+  subtree: true,
+});
+
+let isFirstClick = true;
+
 async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
   try {
-    const imagesWithBase64 = await Promise.all(
-      images.map(async img => ({
-        img_url: img.src,
-        img_file: await toBase64(img.src),
-      })),
-    );
+    // background script에 메시지 전송
+    const imagesWithBase64 = await chrome.runtime.sendMessage({
+      type: 'FETCH_IMAGES',
+      images: images.map(img => img.src),
+    });
 
     const response = await fetch('YOUR_API_ENDPOINT', {
       method: 'POST',
@@ -38,7 +71,6 @@ async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
     return null;
   }
 }
-
 // 페이지의 모든 이미지를 스캔하고 alt 텍스트 업데이트
 async function updateImageAlts() {
   const images = Array.from(document.getElementsByTagName('img'));
@@ -47,7 +79,7 @@ async function updateImageAlts() {
     src: img.src,
     currentAlt: img.alt,
   }));
-  console.log(imageData.length);
+  console.log(imageData);
 
   const newAltTexts = await fetchNewAltTexts(imageData);
 
@@ -60,11 +92,9 @@ async function updateImageAlts() {
   }
 }
 
-// 페이지 로드 완료 시 실행
-document.addEventListener('DOMContentLoaded', updateImageAlts);
-
 document.addEventListener('click', e => {
   const target = e.target as HTMLElement;
+  console.log('click');
 
   target.style.border = '10px solid blue';
 
@@ -126,11 +156,4 @@ function removeBlurEffect() {
     style.remove();
   }
 }
-
-// 페이지 로드 시 블러 필터 추가
-document.addEventListener('DOMContentLoaded', addBlurEffect);
-
-// 페이지를 떠날 때 블러 필터 제거
-window.addEventListener('beforeunload', removeBlurEffect);
-
 void toggleTheme();
