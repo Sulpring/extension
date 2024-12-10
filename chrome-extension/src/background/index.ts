@@ -6,11 +6,18 @@ exampleThemeStorage.get().then(theme => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('image start');
   if (message.type === 'FETCH_IMAGES') {
     Promise.all(
       message.images.map(async (imgUrl: string) => {
         try {
-          const response = await fetch(imgUrl);
+          const response = await fetch(imgUrl, {
+            credentials: 'omit',
+            mode: 'cors',
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
           const blob = await response.blob();
           return new Promise(resolve => {
             const reader = new FileReader();

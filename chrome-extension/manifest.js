@@ -34,6 +34,10 @@ const manifest = deepmerge(
       service_worker: 'background.iife.js',
       type: 'module',
     },
+    content_security_policy: {
+      extension_pages:
+        "script-src 'self'; object-src 'self'; connect-src 'self' https://devcjs.co.kr https://* http://* data: blob:; img-src 'self' https://* http://* data: blob:;",
+    },
     action: {
       default_popup: 'popup/index.html',
       default_icon: 'icon-34.png',

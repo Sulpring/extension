@@ -5,6 +5,7 @@ console.log('content script loaded');
 //addBlurEffect();
 
 let isScreenReaderEnabled = true;
+let isProcessingImages = false;
 
 // 초기 상태 로드
 chrome.storage.local.get(['screenReaderEnabled'], result => {
@@ -64,34 +65,63 @@ observer.observe(document.documentElement, {
 let isFirstClick = true;
 
 async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
+  if (isProcessingImages) {
+    console.log('이미지 처리 중... 새로운 요청 무시됨');
+    return null;
+  }
+
   try {
-    // background script에 메시지 전송
-    const imagesWithBase64 = await chrome.runtime.sendMessage({
-      type: 'FETCH_IMAGES',
-      images: images.map(img => img.src),
-    });
+    isProcessingImages = true;
+    console.log('이미지 처리 시작');
 
-    const response = await fetch('YOUR_API_ENDPOINT', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ images: imagesWithBase64 }),
-    });
+    // 이미지를 3개씩 나누어 처리
+    const batchSize = 3;
+    const results = [];
+    for (let i = 0; i < images.length; i += batchSize) {
+      const batch = images.slice(i, i + batchSize);
+      // background script에 메시지 전송
+      const imagesWithBase64 = await chrome.runtime.sendMessage({
+        type: 'FETCH_IMAGES',
+        images: batch.map(img => img.src),
+      });
+      console.log(imagesWithBase64);
+      const response = await fetch('https://devcjs.co.kr/explain', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imgs: imagesWithBase64 }),
+      });
 
-    return await response.json();
+      const result = await response.json();
+      results.push(...result);
+
+      // 배치 처리 사이에 잠시 대기
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    return results;
   } catch (error) {
     console.error('Alt 텍스트 가져오기 실패:', error);
+    console.log(error);
     return null;
+  } finally {
+    isProcessingImages = false;
+    console.log('이미지 처리 완료');
   }
 }
 // 페이지의 모든 이미지를 스캔하고 alt 텍스트 업데이트
 async function updateImageAlts() {
+  if (isProcessingImages) {
+    console.log('이미지 처리 중... updateImageAlts 무시됨');
+    return;
+  }
+
   const images = Array.from(document.getElementsByTagName('img'));
 
   const significantImages = images.filter(img => {
     const rect = img.getBoundingClientRect();
-    return rect.width >= 200;
+    return rect.width >= 200 && img.src !== '';
   });
 
   const imageData = significantImages.map(img => ({
@@ -99,15 +129,19 @@ async function updateImageAlts() {
     currentAlt: img.alt,
   }));
   console.log('처리할 이미지 수:', imageData.length);
-
+  if (imageData.length === 0) {
+    console.log('처리할 이미지가 없음');
+    return;
+  }
   const newAltTexts = await fetchNewAltTexts(imageData);
 
   if (newAltTexts) {
-    images.forEach((img, index) => {
+    significantImages.forEach((img, index) => {
       if (newAltTexts[index]) {
         img.alt = newAltTexts[index];
       }
     });
+    console.log('이미지 alt 텍스트 업데이트 완료');
   }
 }
 
@@ -340,12 +374,3 @@ function addBlurEffect() {
   `;
   document.head.appendChild(style);
 }
-
-// 블러 필터를 제거하는 함수
-function removeBlurEffect() {
-  const style = document.getElementById('blur-effect-style');
-  if (style) {
-    style.remove();
-  }
-}
-void toggleTheme();
