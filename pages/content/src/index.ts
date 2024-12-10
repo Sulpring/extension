@@ -111,17 +111,208 @@ async function updateImageAlts() {
   }
 }
 
+// 포커스 가능한 요소들을 가져오는 함수
+function getFocusableElements(): HTMLElement[] {
+  // 의미 있는 요소들의 선택자
+  const selectors = `
+    a, button, input, select, textarea, img,
+    p, h1, h2, h3, h4, h5, h6, li, span:not(:empty)
+  `;
+
+  const allElements = Array.from(document.querySelectorAll(selectors)) as HTMLElement[];
+
+  return allElements.filter(element => {
+    // 요소가 화면에 보이는지 확인
+    const isVisible = (element: HTMLElement): boolean => {
+      const style = window.getComputedStyle(element);
+      return !!(
+        element.offsetWidth &&
+        element.offsetHeight &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none' &&
+        style.opacity !== '0' &&
+        // 요소가 화면 영역 내에 있는지 확인
+        element.getBoundingClientRect().height > 0
+      );
+    };
+
+    // 의미 있는 컨텐츠가 있는지 확인
+    const hasContent = (element: HTMLElement): boolean => {
+      if (element.tagName === 'IMG') {
+        return true;
+      }
+
+      // 직접적인 텍스트 노드 확인
+      const hasDirectText = Array.from(element.childNodes).some(
+        node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim().length > 0,
+      );
+
+      // 입력 요소인 경우
+      if (element instanceof HTMLInputElement || element instanceof HTMLButtonElement) {
+        return true;
+      }
+
+      return hasDirectText || element.innerText.trim().length > 0;
+    };
+
+    // 부모 요소 중에 이미 선택된 의미 있는 텍스트가 있는지 확인
+    const hasSelectedParentWithSameText = (element: HTMLElement): boolean => {
+      let parent = element.parentElement;
+      while (parent) {
+        if (
+          allElements.includes(parent) &&
+          parent.innerText.trim() === element.innerText.trim() &&
+          !hasContent(element)
+        ) {
+          return true;
+        }
+        parent = parent.parentElement;
+      }
+      return false;
+    };
+
+    return isVisible(element) && hasContent(element) && !hasSelectedParentWithSameText(element);
+  });
+}
+
+// 요소들의 tabindex 설정
+function setupTabIndexes() {
+  const elements = getFocusableElements();
+  elements.forEach(element => {
+    if (!element.hasAttribute('tabindex')) {
+      element.setAttribute('tabindex', '-1'); // 키보드 탐색만 가능하도록 설정
+    }
+  });
+}
+
+// 초기 설정 및 동적 변경 감지
+document.addEventListener('DOMContentLoaded', setupTabIndexes);
+
+// DOM 변경 감지하여 새로운 요소에 대해 tabindex 설정
+const newObserver = new MutationObserver(() => {
+  setupTabIndexes();
+});
+
+newObserver.observe(document.documentElement, {
+  childList: true,
+  subtree: true,
+});
+
+// 현재 포커스된 요소의 인덱스를 찾는 함수
+function getCurrentFocusIndex(elements: HTMLElement[]): number {
+  const currentElement = document.activeElement as HTMLElement;
+  return elements.indexOf(currentElement);
+}
+
+// 포커스된 요소의 텍스트를 읽는 함수
+function readElement(element: HTMLElement) {
+  if (!isScreenReaderEnabled) return;
+
+  document.querySelectorAll('.screen-reader-focus').forEach(el => {
+    el.classList.remove('screen-reader-focus');
+  });
+
+  element.classList.add('screen-reader-focus');
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  let content = '';
+  if (element.tagName === 'IMG') {
+    content = (element as HTMLImageElement).alt || '대체 텍스트가 없는 이미지입니다.';
+  } else if (element instanceof HTMLInputElement) {
+    content = element.value || element.placeholder || '입력 필드';
+  } else {
+    content = element.innerText.trim() || '텍스트가 없습니다.';
+  }
+
+  const elementType = getElementType(element);
+  const positionInfo = `${elementType}: `;
+  const utterance = new SpeechSynthesisUtterance(positionInfo + content);
+  utterance.lang = 'ko-KR';
+
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
+}
+
+// 요소 타입을 한글로 반환하는 헬퍼 함수
+function getElementType(element: HTMLElement): string {
+  const tagMap: { [key: string]: string } = {
+    A: '링크',
+    BUTTON: '버튼',
+    INPUT: '입력 필드',
+    IMG: '이미지',
+    P: '문단',
+    H1: '제목 1',
+    H2: '제목 2',
+    H3: '제목 3',
+    LI: '목록 항목',
+    TD: '테이블 셀',
+    TH: '테이블 헤더',
+    DIV: '영역',
+    SPAN: '텍스트',
+  };
+
+  return tagMap[element.tagName] || element.tagName.toLowerCase();
+}
+
+// 키보드 이벤트 리스너 수정
+document.addEventListener('keydown', e => {
+  if (!isScreenReaderEnabled) return;
+
+  const focusableElements = getFocusableElements();
+  const currentIndex = getCurrentFocusIndex(focusableElements);
+
+  let nextIndex = -1;
+
+  switch (e.key) {
+    case 'ArrowRight':
+      e.preventDefault();
+      nextIndex = currentIndex + 1;
+      if (nextIndex >= focusableElements.length) {
+        nextIndex = 0; // 처음으로 순환
+      }
+      break;
+
+    case 'ArrowLeft':
+      e.preventDefault();
+      nextIndex = currentIndex - 1;
+      if (nextIndex < 0) {
+        nextIndex = focusableElements.length - 1; // 마지막으로 순환
+      }
+      break;
+
+    case 'Enter':
+      // Enter 키로 선택된 요소 활성화
+      if (document.activeElement instanceof HTMLElement) {
+        e.preventDefault();
+        document.activeElement.click();
+      }
+      return;
+  }
+
+  if (nextIndex !== -1) {
+    const nextElement = focusableElements[nextIndex];
+    nextElement.focus();
+    readElement(nextElement);
+  }
+});
+
+// 시각적 포커스 표시를 위한 스타일 동적 추가
+const style = document.createElement('style');
+style.textContent = `
+  .screen-reader-focus {
+    outline: 10px solid #2196F3 !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 8px rgba(33, 150, 243, 0.6);
+    transition: outline 0.2s ease-in-out;
+  }
+`;
+document.head.appendChild(style);
+
 document.addEventListener('click', e => {
-  if (!isScreenReaderEnabled) return; // 스크린 리더가 비활성화되어 있으면 실행하지 않음
+  if (!isScreenReaderEnabled) return;
 
   const target = e.target as HTMLElement;
-  console.log('click');
-
-  target.style.border = '10px solid blue';
-
-  setTimeout(() => {
-    target.style.border = '';
-  }, 2000);
+  readElement(target);
 
   if (target.tagName === 'IMG') {
     const img = target as HTMLImageElement;
@@ -131,29 +322,9 @@ document.addEventListener('click', e => {
       e.preventDefault();
       isFirstClick = false;
 
-      // 3초 후에 isFirstClick 초기화
       setTimeout(() => {
         isFirstClick = true;
       }, 3000);
-    }
-
-    const altText = img.alt || '대체 텍스트가 없는 이미지입니다.';
-    const utterance = new SpeechSynthesisUtterance(altText);
-    utterance.lang = 'ko-KR';
-
-    speechSynthesis.cancel();
-    speechSynthesis.speak(utterance);
-  } else {
-    // 이미지가 아닌 경우 텍스트 읽기
-    const textContent = target.textContent?.trim();
-    if (textContent) {
-      const utterance = new SpeechSynthesisUtterance(textContent);
-      utterance.lang = 'ko-KR';
-
-      speechSynthesis.cancel();
-      speechSynthesis.speak(utterance);
-    } else {
-      speechSynthesis.speak(new SpeechSynthesisUtterance('텍스트가 없습니다.'));
     }
   }
 });
