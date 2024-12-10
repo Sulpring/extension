@@ -4,6 +4,20 @@ console.log('content script loaded');
 // 시연 시 저시력자 시연용 블러 필터 적용
 //addBlurEffect();
 
+let isScreenReaderEnabled = true;
+
+// 초기 상태 로드
+chrome.storage.local.get(['screenReaderEnabled'], result => {
+  isScreenReaderEnabled = result.screenReaderEnabled ?? true;
+});
+
+// 메시지 리스너 추가
+chrome.runtime.onMessage.addListener(message => {
+  if (message.type === 'TOGGLE_SCREEN_READER') {
+    isScreenReaderEnabled = message.enabled;
+  }
+});
+
 function waitForImages(): Promise<void> {
   return new Promise(resolve => {
     let lastCount = 0;
@@ -98,6 +112,8 @@ async function updateImageAlts() {
 }
 
 document.addEventListener('click', e => {
+  if (!isScreenReaderEnabled) return; // 스크린 리더가 비활성화되어 있으면 실행하지 않음
+
   const target = e.target as HTMLElement;
   console.log('click');
 

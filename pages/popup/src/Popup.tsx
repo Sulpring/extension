@@ -1,7 +1,7 @@
 import '@src/Popup.css';
 import { useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
 import { exampleThemeStorage } from '@extension/storage';
-import { useState, type ComponentPropsWithoutRef } from 'react';
+import { useEffect, useState, type ComponentPropsWithoutRef } from 'react';
 
 const notificationOptions = {
   type: 'basic',
@@ -10,36 +10,30 @@ const notificationOptions = {
   message: 'You cannot inject script here!',
 } as const;
 
-type Image = {
-  imageUrl: string;
-  imageAlt: string;
-};
-
 const Popup = () => {
-  const [imageUrls, setImageUrls] = useState<Image[]>([]);
-  const [isReading, setIsReading] = useState(false);
+  const [isScreenReaderEnabled, setIsScreenReaderEnabled] = useState(true);
   const theme = useStorage(exampleThemeStorage);
   const isLight = theme === 'light';
 
-  const stopReading = () => {
-    speechSynthesis.cancel();
-    setIsReading(false);
-  };
+  useEffect(() => {
+    // 초기 상태 로드
+    chrome.storage.local.get(['screenReaderEnabled'], result => {
+      setIsScreenReaderEnabled(result.screenReaderEnabled ?? true);
+    });
+  }, []);
 
-  const startReading = () => {
-    setIsReading(true);
-    const altTexts = Array.from(imageUrls)
-
-      .map(img => img.imageAlt || '대체 텍스트가 없는 이미지입니다.');
-    console.log(altTexts);
-
-    altTexts.forEach((text, index) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ko-KR';
-      if (index === altTexts.length - 1) {
-        utterance.onend = () => setIsReading(false);
+  const toggleScreenReader = () => {
+    const newState = !isScreenReaderEnabled;
+    setIsScreenReaderEnabled(newState);
+    chrome.storage.local.set({ screenReaderEnabled: newState });
+    // content script에 상태 변경 알림
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+      if (tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'TOGGLE_SCREEN_READER',
+          enabled: newState,
+        });
       }
-      speechSynthesis.speak(utterance);
     });
   };
 
@@ -50,26 +44,6 @@ const Popup = () => {
       chrome.notifications.create('inject-error', notificationOptions);
       return;
     }
-
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id! },
-        func: () => {
-          const images = document.getElementsByTagName('img');
-          return Array.from(images)
-            .filter(img => img.src !== '')
-            .map(img => ({
-              imageUrl: img.src,
-              imageAlt: img.alt,
-            }));
-        },
-      });
-      setImageUrls(results[0].result ?? []);
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('Cannot access a chrome:// URL')) {
-        chrome.notifications.create('inject-error', notificationOptions);
-      }
-    }
   };
 
   return (
@@ -77,33 +51,18 @@ const Popup = () => {
       <header className={`App-header ${isLight ? 'text-gray-900' : 'text-gray-100'}`}>
         <button
           className={
-            'font-bold mt-4 py-1 px-4 rounded shadow hover:scale-105 ' +
-            (isLight ? 'bg-blue-200 text-black' : 'bg-gray-700 text-white')
+            'w-[300px] h-[300px] font-bold text-5xl mt-4 py-1 px-4 rounded shadow hover:scale-105 break-keep ' +
+            (isScreenReaderEnabled ? 'bg-blue-200 text-black' : 'bg-gray-700 text-white')
           }
-          onClick={injectContentScript}>
-          스크랩 이미지 가져오기
+          onClick={toggleScreenReader}>
+          {isScreenReaderEnabled ? '스크린 리더 비활성화' : '스크린 리더 활성화'}
         </button>
-
-        <div className="mt-4 max-h-60 overflow-y-auto">
-          {imageUrls.map((img, index) => (
-            <div key={index} className="mb-2 text-sm">
-              <img src={img.imageUrl} alt={img.imageAlt} className="mr-2 inline-block size-16 object-cover" />
-              <span className="break-all">{img.imageAlt}</span>
-            </div>
-          ))}
+        <div className="invisible">
+          <label>
+            <input type="checkbox" checked={isScreenReaderEnabled} onChange={toggleScreenReader} />
+            스크린 리더 활성화
+          </label>
         </div>
-
-        {imageUrls.length > 0 && (
-          <button
-            className={
-              'font-bold mt-4 py-1 px-4 rounded shadow hover:scale-105 ' +
-              (isLight ? 'bg-green-200 text-black' : 'bg-green-700 text-white')
-            }
-            onClick={isReading ? stopReading : startReading}>
-            {isReading ? '읽기 중지' : '이미지 설명 읽기'}
-          </button>
-        )}
-
         <ToggleButton>Toggle theme</ToggleButton>
       </header>
     </div>
