@@ -72,36 +72,25 @@ async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
     isProcessingImages = true;
     console.log('이미지 처리 시작');
 
-    // 이미지를 3개씩 나누어 처리
-    const batchSize = 3;
-    const results = [];
-    for (let i = 0; i < images.length; i += batchSize) {
-      const batch = images.slice(i, i + batchSize);
-      // background script에 메시지 전송
-      const imagesWithBase64 = await chrome.runtime.sendMessage({
-        type: 'FETCH_IMAGES',
-        images: batch.map(img => img.src),
-      });
-      console.log(imagesWithBase64);
-      const response = await fetch('https://devcjs.co.kr/explain/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ imgs: imagesWithBase64 }),
-      });
+    // 모든 이미지를 한꺼번에 처리
+    const imagesWithBase64 = await chrome.runtime.sendMessage({
+      type: 'FETCH_IMAGES',
+      images: images.map(img => img.src),
+    });
+    console.log(imagesWithBase64);
 
-      const result = await response.json();
-      results.push(...result);
+    const response = await fetch('https://devcjs.co.kr/explain/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imgs: imagesWithBase64 }),
+    });
 
-      // 배치 처리 사이에 잠시 대기
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
+    const results = await response.json();
     return results;
   } catch (error) {
     console.error('Alt 텍스트 가져오기 실패:', error);
-    console.log(error);
     return null;
   } finally {
     isProcessingImages = false;
@@ -163,14 +152,18 @@ async function updateImageAlts() {
     return;
   }
 
-  const newAltTexts = await fetchNewAltTexts(imageData);
+  const response = await fetchNewAltTexts(imageData);
 
-  if (newAltTexts) {
+  if (response && response.explain_list) {
     significantImages.forEach((img, index) => {
-      if (newAltTexts[index]) {
-        img.alt = newAltTexts[index];
-        // 처리 완료 후 시각적 표시 제거
-        img.classList.remove('processing-alt');
+      const explanation = response.explain_list[index];
+      if (explanation) {
+        // human_explain이 있으면 우선 사용, 없으면 ai_explain 사용
+        const altText = explanation.ai_explain || explanation.human_explain;
+        if (altText) {
+          img.alt = altText;
+          img.classList.remove('processing-alt');
+        }
       }
     });
     console.log('이미지 alt 텍스트 업데이트 완료');
@@ -182,6 +175,7 @@ async function updateImageAlts() {
         img.classList.remove('processing-alt');
       }
     });
+    console.log('이미지 alt 텍스트 업데이트 실패');
   }
 }
 
