@@ -1,5 +1,3 @@
-import { toggleTheme } from '@src/toggleTheme';
-
 console.log('content script loaded');
 // 시연 시 저시력자 시연용 블러 필터 적용
 //addBlurEffect();
@@ -118,30 +116,72 @@ async function updateImageAlts() {
   }
 
   const images = Array.from(document.getElementsByTagName('img'));
-
   const significantImages = images.filter(img => {
     const rect = img.getBoundingClientRect();
     return rect.width >= 200 && img.src !== '';
+  });
+
+  // 처리 전 임시 표시 추가
+  significantImages.forEach(img => {
+    if (!img.alt || img.alt.trim() === '') {
+      img.alt = '이미지 설명 생성 중...';
+      // 처리 중임을 시각적으로 표시
+      img.classList.add('processing-alt');
+
+      // 처리 중 표시 스타일 추가
+      const processingStyle = document.createElement('style');
+      processingStyle.textContent = `
+        .processing-alt {
+          outline: 2px dashed #FFB800;
+          outline-offset: 2px;
+          position: relative;
+        }
+        .processing-alt::after {
+          content: '🔄 이미지 분석 중...';
+          position: absolute;
+          top: 0;
+          left: 0;
+          background: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 4px 8px;
+          font-size: 12px;
+          border-radius: 4px;
+        }
+      `;
+      document.head.appendChild(processingStyle);
+    }
   });
 
   const imageData = significantImages.map(img => ({
     src: img.src,
     currentAlt: img.alt,
   }));
+
   console.log('처리할 이미지 수:', imageData.length);
   if (imageData.length === 0) {
     console.log('처리할 이미지가 없음');
     return;
   }
+
   const newAltTexts = await fetchNewAltTexts(imageData);
 
   if (newAltTexts) {
     significantImages.forEach((img, index) => {
       if (newAltTexts[index]) {
         img.alt = newAltTexts[index];
+        // 처리 완료 후 시각적 표시 제거
+        img.classList.remove('processing-alt');
       }
     });
     console.log('이미지 alt 텍스트 업데이트 완료');
+  } else {
+    // 처리 실패 시 표시 업데이트
+    significantImages.forEach(img => {
+      if (img.classList.contains('processing-alt')) {
+        img.alt = '이미지 설명을 생성하지 못했습니다.';
+        img.classList.remove('processing-alt');
+      }
+    });
   }
 }
 
