@@ -85,7 +85,7 @@ async function fetchNewAltTexts(images: { src: string; currentAlt: string }[]) {
         images: batch.map(img => img.src),
       });
       console.log(imagesWithBase64);
-      const response = await fetch('https://devcjs.co.kr/explain', {
+      const response = await fetch('https://devcjs.co.kr/explain/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
